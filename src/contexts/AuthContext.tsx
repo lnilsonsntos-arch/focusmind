@@ -1,31 +1,19 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
+import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, Profile, getProfilePhotoUrl } from '../lib/supabase';
-
-// Debug logging - always on for diagnosis
-const DEBUG_AUTH = true;
-const log = (...args: any[]) => {
-  if (DEBUG_AUTH) {
-    console.log('[AUTH]', new Date().toISOString().split('T')[1], ...args);
-  }
-};
-const logError = (...args: any[]) => {
-  console.error('[AUTH ERROR]', new Date().toISOString().split('T')[1], ...args);
-};
 
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   session: Session | null;
-  loading: boolean;
-  isInitializing: boolean;
-  signUp: (email: string, password: string, nome: string) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signInWithGoogle: () => Promise<{ error: Error | null }>;
+  isLoading: boolean;
+  signUp: (email: string, password: string, nome: string) => Promise<{ error: string | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ error: Error | null }>;
-  updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
-  uploadProfilePhoto: (file: File) => Promise<{ url: string | null; error: Error | null }>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  updateProfile: (updates: Partial<Profile>) => Promise<{ error: string | null }>;
+  uploadProfilePhoto: (file: File) => Promise<{ url: string | null; error: string | null }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -35,43 +23,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // Fetch profile from database
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    log('>>> fetchProfile START for user:', userId);
-    try {
-      log('>>> fetchProfile: calling supabase.from(profiles).select()...');
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
 
-      log('>>> fetchProfile: supabase query returned', { hasData: !!data, error: error?.message });
-
-      if (error) {
-        logError('fetchProfile error:', error);
-        return null;
-      }
-
-      if (data) {
-        log('>>> fetchProfile: found profile, returning...');
-        const profileWithPhotoUrl = {
-          ...data,
-          foto_perfil: getProfilePhotoUrl(data.foto_perfil)
-        };
-        setProfile(profileWithPhotoUrl);
-        log('>>> fetchProfile DONE - profile set');
-        return profileWithPhotoUrl;
-      }
-
-      log('>>> fetchProfile: no profile found, returning null');
-      return null;
-    } catch (err) {
-      logError('>>> fetchProfile EXCEPTION:', err);
+    if (error) {
+      console.error('Error fetching profile:', error.message);
       return null;
     }
+
+    if (data) {
+      const profileWithPhoto = {
+        ...data,
+        foto_perfil: getProfilePhotoUrl(data.foto_perfil)
+      };
+      setProfile(profileWithPhoto);
+      return profileWithPhoto;
+    }
+
+    return null;
+  };
+
+  // Create profile if it doesn't exist
+  const createProfile = async (userId: string, email: string, nome: string): Promise<boolean> => {
+    const { error } = await supabase.from('profiles').insert({
+      id: userId,
+      nome,
+      email
+    });
+
+    if (error) {
+      console.error('Error creating profile:', error.message);
+      return false;
+    }
+
+    return true;
   };
 
   const refreshProfile = async () => {
@@ -80,200 +72,127 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Initialize auth state on mount
   useEffect(() => {
     let mounted = true;
-    log('AuthProvider mounted, initializing...');
 
-    const initializeAuth = async () => {
+    const initAuth = async () => {
       try {
-        log('>>> initializeAuth START');
-        log('>>> calling supabase.auth.getSession()...');
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        // Get existing session from storage
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
 
-        log('>>> getSession returned:', { hasSession: !!currentSession, error: error?.message });
-
-        if (error) {
-          logError('getSession error:', error);
-        }
-
-        if (mounted) {
-          if (currentSession && currentSession.user) {
-            log('>>> setting session/user from initial session');
-            setSession(currentSession);
-            setUser(currentSession.user);
-            log('>>> fetching profile for existing session...');
-            await fetchProfile(currentSession.user.id);
-          }
-          setLoading(false);
-          setIsInitializing(false);
-          log('>>> initializeAuth DONE - loading=false, isInitializing=false');
+        if (mounted && existingSession) {
+          setSession(existingSession);
+          setUser(existingSession.user);
+          await fetchProfile(existingSession.user.id);
         }
       } catch (error) {
-        logError('>>> initializeAuth EXCEPTION:', error);
+        console.error('Auth init error:', error);
+      } finally {
         if (mounted) {
-          setLoading(false);
-          setIsInitializing(false);
+          setIsLoading(false);
         }
       }
     };
 
-    initializeAuth();
+    initAuth();
 
-    log('>>> Setting up onAuthStateChange listener...');
+    // Subscribe to auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, newSession: Session | null) => {
-        log('>>> onAuthStateChange EVENT:', event, 'hasSession:', !!newSession);
+      (event, newSession) => {
+        if (!mounted) return;
 
-        if (!mounted) {
-          log('>>> onAuthStateChange: component unmounted, skipping');
-          return;
-        }
-
-        if (event === 'INITIAL_SESSION') {
-          log('>>> INITIAL_SESSION event - skipping (handled by initializeAuth)');
-          return;
-        }
-
-        if (event === 'SIGNED_IN' && newSession?.user) {
-          log('>>> SIGNED_IN event - updating state');
-          setSession(newSession);
-          setUser(newSession.user);
-          log('>>> SIGNED_IN: calling fetchProfile...');
-          await fetchProfile(newSession.user.id);
-          log('>>> SIGNED_IN: fetchProfile done, setting loading=false');
-          setLoading(false);
-          return;
-        }
+        // Update session and user
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
 
         if (event === 'SIGNED_OUT') {
-          log('>>> SIGNED_OUT event');
           setProfile(null);
-          setUser(null);
-          setSession(null);
-          setLoading(false);
-          return;
-        }
-
-        if (event === 'TOKEN_REFRESHED') {
-          log('>>> TOKEN_REFRESHED event');
-          setSession(newSession);
-          setUser(newSession?.user ?? null);
-          return;
-        }
-
-        if (newSession?.user) {
-          setSession(newSession);
-          setUser(newSession.user);
         }
       }
     );
 
     return () => {
-      log('>>> AuthProvider cleanup');
       mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
+  // Fetch profile whenever user changes
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    const loadProfile = async () => {
+      let existingProfile = await fetchProfile(user.id);
+
+      // Create profile if missing
+      if (!existingProfile) {
+        const nome = user.user_metadata?.nome ||
+                     user.user_metadata?.full_name ||
+                     user.user_metadata?.name ||
+                     user.email?.split('@')[0] ||
+                     'Usuario';
+
+        const created = await createProfile(user.id, user.email || '', nome);
+        if (created) {
+          await fetchProfile(user.id);
+        }
+      }
+    };
+
+    loadProfile();
+  }, [user?.id]);
+
   const signUp = async (email: string, password: string, nome: string) => {
-    log('>>> signUp called:', email);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { nome } }
+        options: {
+          data: { nome }
+        }
       });
 
       if (error) {
-        logError('>>> signUp error:', error);
-        return { error };
+        return { error: error.message };
       }
 
+      // User created but needs email confirmation
       if (data.user && !data.session) {
-        log('>>> signUp: email confirmation required');
         return { error: null };
       }
 
       return { error: null };
     } catch (err) {
-      logError('>>> signUp EXCEPTION:', err);
-      return { error: err as Error };
+      return { error: 'Erro inesperado ao criar conta' };
     }
   };
 
   const signIn = async (email: string, password: string) => {
-    log('========================================');
-    log('>>> signIn START for:', email);
-
     try {
-      log('>>> (1) Calling supabase.auth.signInWithPassword...');
-
-      // Add timeout wrapper to detect hanging
-      const signInPromise = supabase.auth.signInWithPassword({ email, password });
-      const timeoutPromise = new Promise<{ error: Error }>((_, reject) =>
-        setTimeout(() => reject(new Error('signInWithPassword TIMEOUT after 15s')), 15000)
-      );
-
-      const { data, error } = await Promise.race([signInPromise, timeoutPromise])
-        .catch(err => ({ data: null, error: err })) as any;
-
-      log('>>> (2) signInWithPassword RETURNED');
-      log('>>>     - hasUser:', !!data?.user);
-      log('>>>     - hasSession:', !!data?.session);
-      log('>>>     - error:', error?.message || 'none');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
 
       if (error) {
-        logError('>>> (2a) signInWithPassword ERROR:', error);
-        return { error };
-      }
-
-      if (!data.session || !data.user) {
-        logError('>>> (2b) No session/user in response');
-        return { error: new Error('Login falhou - sessao nao criada') };
-      }
-
-      log('>>> (3) Setting session and user state...');
-      setSession(data.session);
-      setUser(data.user);
-      log('>>> (3) State updated');
-
-      log('>>> (4) Calling fetchProfile...');
-      const profileResult = await fetchProfile(data.user.id);
-      log('>>> (4) fetchProfile returned:', profileResult ? 'found' : 'not found');
-
-      if (!profileResult) {
-        log('>>> (5) Profile not found, creating new...');
-        const nome = data.user.user_metadata?.nome ||
-                    data.user.user_metadata?.full_name ||
-                    data.user.user_metadata?.name ||
-                    data.user.email?.split('@')[0] || 'Usuario';
-
-        const { error: insertError } = await supabase.from('profiles').insert({
-          id: data.user.id,
-          nome,
-          email: data.user.email
-        });
-
-        if (insertError) {
-          logError('>>> (5) Profile insert error:', insertError);
-        } else {
-          log('>>> (5) Profile created, fetching...');
-          await fetchProfile(data.user.id);
+        if (error.message === 'Invalid login credentials') {
+          return { error: 'Email ou senha incorretos' };
         }
+        return { error: error.message };
       }
 
-      log('>>> signIn COMPLETE - returning { error: null }');
-      log('========================================');
+      // Session is automatically set by onAuthStateChange
       return { error: null };
-
     } catch (err) {
-      logError('>>> signIn EXCEPTION:', err);
-      return { error: err as Error };
+      return { error: 'Erro inesperado ao fazer login' };
     }
   };
 
   const signInWithGoogle = async () => {
-    log('>>> signInWithGoogle called');
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -281,47 +200,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           redirectTo: `${window.location.origin}/auth/callback`,
           queryParams: {
             access_type: 'offline',
-            prompt: 'consent',
+            prompt: 'consent'
           }
         }
       });
 
       if (error) {
-        logError('>>> signInWithGoogle error:', error);
-        return { error };
+        return { error: error.message };
       }
 
       return { error: null };
     } catch (err) {
-      logError('>>> signInWithGoogle EXCEPTION:', err);
-      return { error: err as Error };
+      return { error: 'Erro ao iniciar login com Google' };
     }
   };
 
   const signOut = async () => {
-    log('>>> signOut called');
-    setLoading(true);
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setSession(null);
-    setLoading(false);
   };
 
   const resetPassword = async (email: string) => {
-    log('>>> resetPassword called:', email);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/reset-password`
       });
-      return { error };
+
+      if (error) {
+        return { error: error.message };
+      }
+
+      return { error: null };
     } catch (err) {
-      return { error: err as Error };
+      return { error: 'Erro ao enviar email de recuperacao' };
     }
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
-    if (!user) return { error: new Error('No user logged in') };
+    if (!user) {
+      return { error: 'Usuario nao autenticado' };
+    }
 
     try {
       const { error } = await supabase
@@ -329,32 +249,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .update(updates)
         .eq('id', user.id);
 
-      if (!error) {
-        setProfile(prev => prev ? { ...prev, ...updates } : null);
+      if (error) {
+        return { error: error.message };
       }
 
-      return { error };
+      setProfile(prev => prev ? { ...prev, ...updates } : null);
+      return { error: null };
     } catch (err) {
-      return { error: err as Error };
+      return { error: 'Erro ao atualizar perfil' };
     }
   };
 
   const uploadProfilePhoto = async (file: File) => {
-    if (!user) return { url: null, error: new Error('No user logged in') };
+    if (!user) {
+      return { url: null, error: 'Usuario nao autenticado' };
+    }
 
     try {
       const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       if (!validTypes.includes(file.type)) {
-        return { url: null, error: new Error('Tipo de arquivo nao suportado') };
+        return { url: null, error: 'Tipo de arquivo nao suportado. Use JPG, PNG, GIF ou WebP.' };
       }
 
       if (file.size > 2 * 1024 * 1024) {
-        return { url: null, error: new Error('Arquivo muito grande') };
+        return { url: null, error: 'Arquivo muito grande. Maximo 2MB.' };
       }
 
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/avatar.${fileExt}`;
 
+      // Delete existing photos
       const { data: existingFiles } = await supabase.storage
         .from('profiles')
         .list(user.id);
@@ -364,24 +288,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.storage.from('profiles').remove(filesToDelete);
       }
 
+      // Upload new photo
       const { error: uploadError } = await supabase.storage
         .from('profiles')
-        .upload(fileName, file, { cacheControl: '3600', upsert: true });
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
 
       if (uploadError) {
-        return { url: null, error: uploadError };
+        return { url: null, error: uploadError.message };
       }
 
       const { data: urlData } = supabase.storage
         .from('profiles')
         .getPublicUrl(fileName);
 
-      const publicUrl = urlData.publicUrl;
-      await updateProfile({ foto_perfil: publicUrl });
+      await updateProfile({ foto_perfil: urlData.publicUrl });
 
-      return { url: publicUrl, error: null };
+      return { url: urlData.publicUrl, error: null };
     } catch (err) {
-      return { url: null, error: err as Error };
+      return { url: null, error: 'Erro ao fazer upload da foto' };
     }
   };
 
@@ -390,8 +317,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       session,
-      loading,
-      isInitializing,
+      isLoading,
       signUp,
       signIn,
       signInWithGoogle,

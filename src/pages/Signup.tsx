@@ -46,9 +46,9 @@ export function Signup() {
 
     if (result.error) {
       setError(
-        result.error.message.includes('already registered')
+        result.error.includes('already registered')
           ? 'Este email ja esta cadastrado'
-          : result.error.message
+          : result.error
       );
       setLoading(false);
       return;
@@ -65,15 +65,13 @@ export function Signup() {
     const result = await signInWithGoogle();
 
     if (result.error) {
-      setError(result.error.message);
+      setError(result.error);
       setGoogleLoading(false);
     }
-    // Redirect will happen automatically via OAuth
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex flex-col">
-      {/* Header */}
       <header className="p-6">
         <button
           onClick={() => navigate('/')}
@@ -84,7 +82,6 @@ export function Signup() {
         </button>
       </header>
 
-      {/* Main */}
       <main className="flex-1 flex items-center justify-center px-6 py-8">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
@@ -117,7 +114,6 @@ export function Signup() {
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Google Sign Up */}
               <button
                 onClick={handleGoogleSignIn}
                 disabled={googleLoading}
@@ -138,7 +134,6 @@ export function Signup() {
                 )}
               </button>
 
-              {/* Divider */}
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-slate-200" />
@@ -206,7 +201,6 @@ export function Signup() {
                       {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
                   </div>
-                  {/* Password requirements */}
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     {passwordRequirements.map((req, i) => (
                       <div

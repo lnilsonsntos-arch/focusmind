@@ -7,16 +7,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-// Debug logging
-const DEBUG_AUTH = true;
-
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce',
-    debug: DEBUG_AUTH
+    flowType: 'pkce'
   }
 });
 
@@ -87,19 +83,8 @@ export type Subscription = {
   data_expiracao: string | null;
 };
 
-// Helper to get public URL for profile photo
 export const getProfilePhotoUrl = (path: string | null) => {
   if (!path) return null;
   if (path.startsWith('http')) return path;
   return `${supabaseUrl}/storage/v1/object/public/profiles/${path}`;
-};
-
-// Helper function to test connection
-export const testSupabaseConnection = async () => {
-  try {
-    const { data, error } = await supabase.from('profiles').select('count').limit(1);
-    return { success: !error, error: error?.message };
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
 };
