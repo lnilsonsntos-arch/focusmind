@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
 import { supabase, Profile, getProfilePhotoUrl } from '../lib/supabase';
 
-// Debug logging
+// Debug logging - always on for diagnosis
 const DEBUG_AUTH = true;
 const log = (...args: any[]) => {
   if (DEBUG_AUTH) {
@@ -39,13 +39,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    log('fetchProfile called for user:', userId);
+    log('>>> fetchProfile START for user:', userId);
     try {
+      log('>>> fetchProfile: calling supabase.from(profiles).select()...');
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
+
+      log('>>> fetchProfile: supabase query returned', { hasData: !!data, error: error?.message });
 
       if (error) {
         logError('fetchProfile error:', error);
@@ -53,19 +56,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data) {
-        log('fetchProfile found profile:', data.email);
+        log('>>> fetchProfile: found profile, returning...');
         const profileWithPhotoUrl = {
           ...data,
           foto_perfil: getProfilePhotoUrl(data.foto_perfil)
         };
         setProfile(profileWithPhotoUrl);
+        log('>>> fetchProfile DONE - profile set');
         return profileWithPhotoUrl;
       }
 
-      log('fetchProfile: no profile found');
+      log('>>> fetchProfile: no profile found, returning null');
       return null;
     } catch (err) {
-      logError('fetchProfile exception:', err);
+      logError('>>> fetchProfile EXCEPTION:', err);
       return null;
     }
   };
@@ -82,29 +86,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const initializeAuth = async () => {
       try {
-        log('Getting initial session...');
+        log('>>> initializeAuth START');
+        log('>>> calling supabase.auth.getSession()...');
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+
+        log('>>> getSession returned:', { hasSession: !!currentSession, error: error?.message });
 
         if (error) {
           logError('getSession error:', error);
         }
 
-        log('Initial session:', currentSession ? `found for ${currentSession.user?.email}` : 'not found');
-
         if (mounted) {
           if (currentSession && currentSession.user) {
-            log('Setting session and user from initial session');
+            log('>>> setting session/user from initial session');
             setSession(currentSession);
             setUser(currentSession.user);
-            log('Fetching profile for existing session...');
+            log('>>> fetching profile for existing session...');
             await fetchProfile(currentSession.user.id);
           }
           setLoading(false);
           setIsInitializing(false);
-          log('Initialization complete');
+          log('>>> initializeAuth DONE - loading=false, isInitializing=false');
         }
       } catch (error) {
-        logError('initializeAuth exception:', error);
+        logError('>>> initializeAuth EXCEPTION:', error);
         if (mounted) {
           setLoading(false);
           setIsInitializing(false);
@@ -114,46 +119,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes
-    log('Setting up onAuthStateChange listener...');
+    log('>>> Setting up onAuthStateChange listener...');
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, newSession: Session | null) => {
-        log('auth state change event:', event, 'session:', newSession ? `${newSession.user?.email}` : 'null');
+        log('>>> onAuthStateChange EVENT:', event, 'hasSession:', !!newSession);
 
         if (!mounted) {
-          log('Component unmounted, skipping');
+          log('>>> onAuthStateChange: component unmounted, skipping');
           return;
         }
 
-        // INITIAL_SESSION is fired when onAuthStateChange is first set up
-        // If we already have a session from initializeAuth, skip this
         if (event === 'INITIAL_SESSION') {
-          log('INITIAL_SESSION event - checking if already initialized');
-          // If initializeAuth already ran, we already have the session
-          // Just ensure state is in sync
-          if (newSession?.user && !user) {
-            log('INITIAL_SESSION: setting user/profile');
-            setSession(newSession);
-            setUser(newSession.user);
-            await fetchProfile(newSession.user.id);
-            setLoading(false);
-            setIsInitializing(false);
-          }
+          log('>>> INITIAL_SESSION event - skipping (handled by initializeAuth)');
           return;
         }
 
         if (event === 'SIGNED_IN' && newSession?.user) {
-          log('SIGNED_IN event - updating state');
+          log('>>> SIGNED_IN event - updating state');
           setSession(newSession);
           setUser(newSession.user);
-          // Fetch profile for the signed in user
+          log('>>> SIGNED_IN: calling fetchProfile...');
           await fetchProfile(newSession.user.id);
+          log('>>> SIGNED_IN: fetchProfile done, setting loading=false');
           setLoading(false);
           return;
         }
 
         if (event === 'SIGNED_OUT') {
-          log('SIGNED_OUT event');
+          log('>>> SIGNED_OUT event');
           setProfile(null);
           setUser(null);
           setSession(null);
@@ -162,13 +155,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (event === 'TOKEN_REFRESHED') {
-          log('TOKEN_REFRESHED event');
+          log('>>> TOKEN_REFRESHED event');
           setSession(newSession);
           setUser(newSession?.user ?? null);
           return;
         }
 
-        // Handle any other events
         if (newSession?.user) {
           setSession(newSession);
           setUser(newSession.user);
@@ -177,112 +169,111 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     return () => {
-      log('AuthProvider unmounting, cleaning up...');
+      log('>>> AuthProvider cleanup');
       mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
   const signUp = async (email: string, password: string, nome: string) => {
-    log('signUp called for:', email);
+    log('>>> signUp called:', email);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: { nome }
-        }
+        options: { data: { nome } }
       });
 
-      log('signUp response:', { user: data.user?.email, session: !!data.session, error: error?.message });
-
       if (error) {
-        logError('signUp error:', error);
+        logError('>>> signUp error:', error);
         return { error };
       }
 
-      // Check if user needs to confirm email
       if (data.user && !data.session) {
-        log('signUp: user created, email confirmation required');
+        log('>>> signUp: email confirmation required');
         return { error: null };
       }
 
       return { error: null };
     } catch (err) {
-      logError('signUp exception:', err);
+      logError('>>> signUp EXCEPTION:', err);
       return { error: err as Error };
     }
   };
 
   const signIn = async (email: string, password: string) => {
-    log('signIn called for:', email);
+    log('========================================');
+    log('>>> signIn START for:', email);
 
     try {
-      log('Calling supabase.auth.signInWithPassword...');
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      log('>>> (1) Calling supabase.auth.signInWithPassword...');
 
-      log('signInWithPassword response:', {
-        user: data.user ? data.user.email : 'null',
-        session: data.session ? 'exists' : 'null',
-        error: error?.message
-      });
+      // Add timeout wrapper to detect hanging
+      const signInPromise = supabase.auth.signInWithPassword({ email, password });
+      const timeoutPromise = new Promise<{ error: Error }>((_, reject) =>
+        setTimeout(() => reject(new Error('signInWithPassword TIMEOUT after 15s')), 15000)
+      );
+
+      const { data, error } = await Promise.race([signInPromise, timeoutPromise])
+        .catch(err => ({ data: null, error: err })) as any;
+
+      log('>>> (2) signInWithPassword RETURNED');
+      log('>>>     - hasUser:', !!data?.user);
+      log('>>>     - hasSession:', !!data?.session);
+      log('>>>     - error:', error?.message || 'none');
 
       if (error) {
-        logError('signInWithPassword error:', error);
+        logError('>>> (2a) signInWithPassword ERROR:', error);
         return { error };
       }
 
-      // Update state immediately with the session
-      if (data.session && data.user) {
-        log('Session received, updating state...');
-        setSession(data.session);
-        setUser(data.user);
-
-        // Fetch or create profile
-        log('Fetching profile for user:', data.user.id);
-        let profileFound = await fetchProfile(data.user.id);
-
-        if (!profileFound) {
-          log('Profile not found, creating...');
-          const nome = data.user.user_metadata?.nome ||
-                      data.user.user_metadata?.full_name ||
-                      data.user.user_metadata?.name ||
-                      data.user.email?.split('@')[0] || 'Usuario';
-
-          log('Creating profile with nome:', nome);
-
-          const { error: insertError } = await supabase.from('profiles').insert({
-            id: data.user.id,
-            nome,
-            email: data.user.email
-          });
-
-          if (insertError) {
-            logError('Error creating profile:', insertError);
-          } else {
-            log('Profile created, fetching...');
-            profileFound = await fetchProfile(data.user.id);
-          }
-        }
-
-        log('signIn complete, profile:', profileFound ? 'found' : 'not found');
-        setLoading(false);
-        return { error: null };
-      } else {
-        logError('No session/user in signIn response');
+      if (!data.session || !data.user) {
+        logError('>>> (2b) No session/user in response');
         return { error: new Error('Login falhou - sessao nao criada') };
       }
+
+      log('>>> (3) Setting session and user state...');
+      setSession(data.session);
+      setUser(data.user);
+      log('>>> (3) State updated');
+
+      log('>>> (4) Calling fetchProfile...');
+      const profileResult = await fetchProfile(data.user.id);
+      log('>>> (4) fetchProfile returned:', profileResult ? 'found' : 'not found');
+
+      if (!profileResult) {
+        log('>>> (5) Profile not found, creating new...');
+        const nome = data.user.user_metadata?.nome ||
+                    data.user.user_metadata?.full_name ||
+                    data.user.user_metadata?.name ||
+                    data.user.email?.split('@')[0] || 'Usuario';
+
+        const { error: insertError } = await supabase.from('profiles').insert({
+          id: data.user.id,
+          nome,
+          email: data.user.email
+        });
+
+        if (insertError) {
+          logError('>>> (5) Profile insert error:', insertError);
+        } else {
+          log('>>> (5) Profile created, fetching...');
+          await fetchProfile(data.user.id);
+        }
+      }
+
+      log('>>> signIn COMPLETE - returning { error: null }');
+      log('========================================');
+      return { error: null };
+
     } catch (err) {
-      logError('signIn exception:', err);
+      logError('>>> signIn EXCEPTION:', err);
       return { error: err as Error };
     }
   };
 
   const signInWithGoogle = async () => {
-    log('signInWithGoogle called');
+    log('>>> signInWithGoogle called');
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -296,45 +287,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (error) {
-        logError('signInWithGoogle error:', error);
+        logError('>>> signInWithGoogle error:', error);
         return { error };
       }
 
-      log('signInWithGoogle initiated, redirecting...');
       return { error: null };
     } catch (err) {
-      logError('signInWithGoogle exception:', err);
+      logError('>>> signInWithGoogle EXCEPTION:', err);
       return { error: err as Error };
     }
   };
 
   const signOut = async () => {
-    log('signOut called');
+    log('>>> signOut called');
     setLoading(true);
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setSession(null);
     setLoading(false);
-    log('signOut complete');
   };
 
   const resetPassword = async (email: string) => {
-    log('resetPassword called for:', email);
+    log('>>> resetPassword called:', email);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/reset-password`
       });
-
-      if (error) {
-        logError('resetPassword error:', error);
-        return { error };
-      }
-
-      log('resetPassword email sent');
-      return { error: null };
+      return { error };
     } catch (err) {
-      logError('resetPassword exception:', err);
       return { error: err as Error };
     }
   };
@@ -385,10 +366,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { error: uploadError } = await supabase.storage
         .from('profiles')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
+        .upload(fileName, file, { cacheControl: '3600', upsert: true });
 
       if (uploadError) {
         return { url: null, error: uploadError };
@@ -406,8 +384,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { url: null, error: err as Error };
     }
   };
-
-  log('Current state:', { user: user?.email, profile: profile?.nome, session: !!session, loading, isInitializing });
 
   return (
     <AuthContext.Provider value={{

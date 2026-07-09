@@ -28,15 +28,18 @@ export function Login() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    log('handleSubmit called for:', email);
+    log('========================================');
+    log('>>> handleSubmit START for:', email);
+    log('>>> (1) setError(null), setLoading(true)');
 
     try {
-      log('Calling signIn...');
+      log('>>> (2) About to call signIn...');
       const result = await signIn(email, password);
-      log('signIn returned:', result);
+      log('>>> (3) signIn RETURNED to handleSubmit');
+      log('>>>     result.error:', result.error?.message || 'null');
 
       if (result.error) {
-        log('signIn error:', result.error.message);
+        log('>>> (4a) Error path - setting error, setLoading(false)');
         setError(result.error.message === 'Invalid login credentials'
           ? 'Email ou senha incorretos'
           : result.error.message);
@@ -44,11 +47,14 @@ export function Login() {
         return;
       }
 
-      log('signIn success, navigating to dashboard...');
+      log('>>> (4b) Success path - setLoading(false), navigate');
       setLoading(false);
+      log('>>> (5) Calling navigate(/dashboard)...');
       navigate('/dashboard', { replace: true });
+      log('>>> (6) navigate called');
+      log('========================================');
     } catch (err) {
-      log('handleSubmit exception:', err);
+      logError('>>> handleSubmit EXCEPTION:', err);
       setError('Erro ao fazer login');
       setLoading(false);
     }
@@ -60,13 +66,11 @@ export function Login() {
     log('handleGoogleSignIn called');
 
     const result = await signInWithGoogle();
-    log('signInWithGoogle returned:', result);
 
     if (result.error) {
       setError(result.error.message);
       setGoogleLoading(false);
     }
-    // Redirect will happen automatically via OAuth
   };
 
   const handleResetPassword = async () => {
@@ -84,6 +88,10 @@ export function Login() {
     } else {
       setResetSent(true);
     }
+  };
+
+  const logError = (...args: any[]) => {
+    console.error('[LOGIN ERROR]', new Date().toISOString().split('T')[1], ...args);
   };
 
   return (
