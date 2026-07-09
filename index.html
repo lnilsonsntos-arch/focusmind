@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+
+    <!-- Primary Meta Tags -->
+    <title>FocusMind - Organize sua mente, alcance seus objetivos</title>
+    <meta name="title" content="FocusMind - Organize sua mente, alcance seus objetivos" />
+    <meta name="description" content="Aplicativo de produtividade pessoal com tarefas, hábitos, metas e um mentor de IA chamado Nova para te ajudar a alcançar seus objetivos." />
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FocusMind" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FocusMind - Organize sua mente, alcance seus objetivos" />
+    <meta property="og:description" content="Aplicativo de produtividade pessoal com tarefas, hábitos, metas e um mentor de IA." />
+    <meta property="og:image" content="/og-image.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="FocusMind - Produtividade Pessoal" />
+    <meta property="twitter:description" content="Aplicativo de produtividade com tarefas, hábitos, metas e mentor IA." />
+
+    <!-- PWA Links -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Splash screens for iOS -->
+    <meta name="apple-touch-startup-image" href="/splash-startup.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>
