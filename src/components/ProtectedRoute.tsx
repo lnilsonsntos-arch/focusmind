@@ -7,11 +7,13 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, isInitializing } = useAuth();
   const location = useLocation();
 
-  // Show loading spinner only during initial auth check
-  if (loading && !user) {
+  // Show loading spinner during initialization phase
+  // This is critical - we must wait for the auth state to be determined
+  // before making any routing decisions
+  if (isInitializing || (loading && !user)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -22,11 +24,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  // If not loading and no user, redirect to login
+  // After initialization, if no user exists, redirect to login
+  // Save the attempted URL for redirect after login
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // User is authenticated, render children
+  // User is authenticated, render the protected content
   return <>{children}</>;
 }

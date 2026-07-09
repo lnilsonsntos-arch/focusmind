@@ -18,6 +18,7 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
+  isInitializing: boolean;
   signUp: (email: string, password: string, nome: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
@@ -35,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
     log('fetchProfile called for user:', userId);
@@ -87,21 +89,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           logError('getSession error:', error);
         }
 
-        log('Initial session:', currentSession ? 'found' : 'not found');
+        log('Initial session:', currentSession ? `found for ${currentSession.user?.email}` : 'not found');
 
         if (mounted) {
-          if (currentSession) {
+          if (currentSession && currentSession.user) {
+            log('Setting session and user from initial session');
             setSession(currentSession);
             setUser(currentSession.user);
+            log('Fetching profile for existing session...');
             await fetchProfile(currentSession.user.id);
           }
           setLoading(false);
-          log('Initialization complete, loading set to false');
+          setIsInitializing(false);
+          log('Initialization complete');
         }
       } catch (error) {
         logError('initializeAuth exception:', error);
         if (mounted) {
           setLoading(false);
+          setIsInitializing(false);
         }
       }
     };
@@ -112,20 +118,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     log('Setting up onAuthStateChange listener...');
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, newSession: Session | null) => {
-        log('auth state change event:', event, 'session:', newSession ? 'exists' : 'null');
+        log('auth state change event:', event, 'session:', newSession ? `${newSession.user?.email}` : 'null');
 
         if (!mounted) {
           log('Component unmounted, skipping');
           return;
         }
 
-        // For SIGNED_IN, we already handle this in signIn() directly
-        // So we skip it here to avoid race conditions
-        if (event === 'SIGNED_IN') {
-          log('SIGNED_IN event - skipping (handled in signIn())');
-          // Just update session/user state, don't fetch profile again
+        // INITIAL_SESSION is fired when onAuthStateChange is first set up
+        // If we already have a session from initializeAuth, skip this
+        if (event === 'INITIAL_SESSION') {
+          log('INITIAL_SESSION event - checking if already initialized');
+          // If initializeAuth already ran, we already have the session
+          // Just ensure state is in sync
+          if (newSession?.user && !user) {
+            log('INITIAL_SESSION: setting user/profile');
+            setSession(newSession);
+            setUser(newSession.user);
+            await fetchProfile(newSession.user.id);
+            setLoading(false);
+            setIsInitializing(false);
+          }
+          return;
+        }
+
+        if (event === 'SIGNED_IN' && newSession?.user) {
+          log('SIGNED_IN event - updating state');
           setSession(newSession);
-          setUser(newSession?.user ?? null);
+          setUser(newSession.user);
+          // Fetch profile for the signed in user
+          await fetchProfile(newSession.user.id);
+          setLoading(false);
           return;
         }
 
@@ -145,9 +168,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Handle other events
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
+        // Handle any other events
+        if (newSession?.user) {
+          setSession(newSession);
+          setUser(newSession.user);
+        }
       }
     );
 
@@ -169,7 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      log('signUp response:', { data: data ? 'exists' : 'null', error: error?.message });
+      log('signUp response:', { user: data.user?.email, session: !!data.session, error: error?.message });
 
       if (error) {
         logError('signUp error:', error);
@@ -237,7 +262,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (insertError) {
             logError('Error creating profile:', insertError);
-            // Try to fetch again anyway
           } else {
             log('Profile created, fetching...');
             profileFound = await fetchProfile(data.user.id);
@@ -245,6 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         log('signIn complete, profile:', profileFound ? 'found' : 'not found');
+        setLoading(false);
         return { error: null };
       } else {
         logError('No session/user in signIn response');
@@ -382,7 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  log('Current state:', { user: user?.email, profile: profile?.nome, session: !!session, loading });
+  log('Current state:', { user: user?.email, profile: profile?.nome, session: !!session, loading, isInitializing });
 
   return (
     <AuthContext.Provider value={{
@@ -390,6 +415,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       session,
       loading,
+      isInitializing,
       signUp,
       signIn,
       signInWithGoogle,
