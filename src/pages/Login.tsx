@@ -4,6 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { Logo } from '../components/Logo';
 import { Eye, EyeOff, Mail, Lock, AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
 
+// Debug logging
+const DEBUG_AUTH = true;
+const log = (...args: any[]) => {
+  if (DEBUG_AUTH) {
+    console.log('[LOGIN]', new Date().toISOString().split('T')[1], ...args);
+  }
+};
+
 export function Login() {
   const navigate = useNavigate();
   const { signIn, signInWithGoogle, resetPassword } = useAuth();
@@ -20,11 +28,15 @@ export function Login() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    log('handleSubmit called for:', email);
 
     try {
+      log('Calling signIn...');
       const result = await signIn(email, password);
+      log('signIn returned:', result);
 
       if (result.error) {
+        log('signIn error:', result.error.message);
         setError(result.error.message === 'Invalid login credentials'
           ? 'Email ou senha incorretos'
           : result.error.message);
@@ -32,12 +44,11 @@ export function Login() {
         return;
       }
 
-      // Sign in succeeded - AuthContext handles session/profile
-      // Navigate after a short delay to ensure state is updated
-      setTimeout(() => {
-        navigate('/dashboard', { replace: true });
-      }, 100);
+      log('signIn success, navigating to dashboard...');
+      setLoading(false);
+      navigate('/dashboard', { replace: true });
     } catch (err) {
+      log('handleSubmit exception:', err);
       setError('Erro ao fazer login');
       setLoading(false);
     }
@@ -46,8 +57,10 @@ export function Login() {
   const handleGoogleSignIn = async () => {
     setError(null);
     setGoogleLoading(true);
+    log('handleGoogleSignIn called');
 
     const result = await signInWithGoogle();
+    log('signInWithGoogle returned:', result);
 
     if (result.error) {
       setError(result.error.message);
@@ -221,7 +234,7 @@ export function Login() {
               {resetSent ? (
                 <div className="p-6 bg-green-50 border border-green-200 rounded-xl text-center">
                   <p className="text-green-700">
-                    Se o email existir em nossa base, você receberá instruções para redefinir sua senha.
+                    Se o email existir em nossa base, voce recebera instrucoes para redefinir sua senha.
                   </p>
                   <button
                     onClick={() => {
@@ -238,7 +251,7 @@ export function Login() {
                   <div className="text-center mb-6">
                     <h2 className="text-xl font-bold text-slate-800">Recuperar senha</h2>
                     <p className="text-slate-600 mt-1 text-sm">
-                      Digite seu email para receber instruções
+                      Digite seu email para receber instrucoes
                     </p>
                   </div>
 
@@ -274,7 +287,7 @@ export function Login() {
                         Enviando...
                       </>
                     ) : (
-                      'Enviar instruções'
+                      'Enviar instrucoes'
                     )}
                   </button>
 
